@@ -80,7 +80,7 @@ def parse_regex_input(input_str: str) -> Pattern:
         input_str += "$"
 
     try:
-        return re.compile(input_str)
+        return re.compile(input_str, re.IGNORECASE)
     except Exception as e:
         raise e
 
@@ -111,7 +111,8 @@ def parse_args(argv):
     parser.add_argument('-b', '--buffer', dest='alternate_buffer', nargs='+', help='Request alternate ring buffer')
     parser.add_argument('-c', '--clear', dest='clear_logcat', action='store_true',
                         help='Clear the entire log before running')
-    parser.add_argument('-t', '--tag', dest='tag', action='append', help='Filter output by specified tag(s)')
+    parser.add_argument('-t', '--tag', dest='tag', action='extend', type=parse_regex_input, nargs='+',
+                        help='Only include the specified tag(s)')
     parser.add_argument('-i', '--ignore-tag', dest='ignored_tag', type=parse_regex_input, action='extend', nargs='+',
                         help='Filter output by ignoring tag(s) matching the given regex')
     parser.add_argument('--proguard-mapping', dest='proguard_mapping', action='store',
@@ -415,7 +416,8 @@ def main():
         RULES[key] = val
 
     device_name_command = base_adb_command + ["shell", "getprop", "ro.product.model"]
-    device_name = subprocess.Popen(device_name_command, stdout=PIPE, stderr=PIPE).communicate()[0].decode("utf-8").strip()
+    device_name = subprocess.Popen(device_name_command, stdout=PIPE, stderr=PIPE).communicate()[0].decode(
+        "utf-8").strip()
     set_term_title(device_name)
 
     adb_command = base_adb_command[:]
@@ -465,6 +467,7 @@ def main():
                 pids.add(pid)
 
     compiled_env_ignore_tags = parse_regex_inputs(ENV_IGNORED_TAGS)
+
     while adb.poll() is None:
         try:
             line = adb.stdout.readline()
