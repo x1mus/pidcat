@@ -272,9 +272,9 @@ def try_parse_death(pattern: Pattern, message: str, pid_group: int = 2, package_
 
 
 def parse_death(package: str, named_processes: str, catchall_package: set[str], pids: set[str], tag: str,
-                message: str) -> tuple[str, str]:
+                message: str) -> Optional[tuple[str, str]]:
     if tag != 'ActivityManager':
-        return None, None
+        return None
 
     killed = try_parse_death(PID_KILL, message, 1, 2)
     if killed and match_packages(package, named_processes, catchall_package, killed[1]) and killed[0] in pids:
@@ -288,7 +288,7 @@ def parse_death(package: str, named_processes: str, catchall_package: set[str], 
     if died and match_packages(package, named_processes, catchall_package, died[1]) and died[0] in pids:
         return died
 
-    return None, None
+    return None
 
 
 def parse_start_process(line: str):
@@ -423,7 +423,7 @@ def main():
         while adb_clear.poll() is None:
             pass
 
-    if sys.stdin.isatty():
+    if IS_TTY:
         adb = subprocess.Popen(adb_command, stdin=PIPE, stdout=PIPE)
     else:
         adb = FakeStdInProcess()
@@ -493,8 +493,10 @@ def main():
                 print_line(line_buffer)
                 last_tag = None  # Ensure next log gets a tag printed
 
-        dead_pid, dead_pname = parse_death(package, named_processes, catchall_package, pids, tag, message)
-        if dead_pid:
+        dead = parse_death(package, named_processes, catchall_package, pids, tag, message)
+        if dead:
+            dead_pid, dead_pname = dead
+
             pids.remove(dead_pid)
             line_buffer = '\n'
             line_buffer += colorize(' ' * (header_size - 1), bg=RED)
