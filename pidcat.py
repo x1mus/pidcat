@@ -22,14 +22,13 @@ limitations under the License.
 # Package filtering and output improvements by Jake Wharton, http://jakewharton.com
 
 import argparse
-import os
 import sys
 import re
 import os
 import subprocess
 from subprocess import PIPE
 
-__version__ = '2.1.1'
+__version__ = '2.2.0'
 
 FROMFILE_PREFIX='@'
 LOG_LEVELS = 'VDIWEF'
