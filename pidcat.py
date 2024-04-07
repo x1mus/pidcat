@@ -31,6 +31,8 @@ from subprocess import PIPE
 __version__ = '2.2.0'
 
 FROMFILE_PREFIX = '@'
+CONF_FILES = [os.path.expanduser('~/.pidcat.conf'), './.pidcat.conf']
+
 LOG_LEVELS = 'VDIWEF'
 LOG_LEVELS_MAP = dict([(LOG_LEVELS[i], i) for i in range(len(LOG_LEVELS))])
 
@@ -77,7 +79,6 @@ def parse_args(argv):
 
 
 def main():
-    CONF_FILES = [os.path.expanduser('~/.pidcat.conf'), './.pidcat.conf']
     argv = ['%s%s' % (FROMFILE_PREFIX, conf) for conf in CONF_FILES if os.path.isfile(conf)]
     argv.extend(sys.argv[1:])
     args = parse_args(argv)
