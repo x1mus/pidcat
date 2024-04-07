@@ -261,14 +261,14 @@ def match_packages(package: str, named_processes: set[str], catchall_package: se
     return (token in catchall_package) if index == -1 else (token[:index] in catchall_package)
 
 
-def try_parse_death(pattern: Pattern, message: str, pid_group: int = 2, package_line_group: int = 1) -> tuple[str, str]:
+def try_parse_death(pattern: Pattern, message: str, pid_group: int = 2, package_line_group: int = 1) -> Optional[tuple[str, str]]:
     match = pattern.match(message)
     if match:
         pid = match.group(pid_group)
         package_line = match.group(package_line_group)
         return pid, package_line
 
-    return None, None
+    return None
 
 
 def parse_death(package: str, named_processes: str, catchall_package: set[str], pids: set[str], tag: str,
