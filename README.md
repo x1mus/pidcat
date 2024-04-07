@@ -1,6 +1,26 @@
 PID Cat
 =======
 
+>A fork of JakeWharton/pidcat, with the following PRs merged:
+>
+>* [#189: New -m REGEX to filter by message](https://github.com/JakeWharton/pidcat/pull/189) (by [johnnylambada](https://github.com/johnnylambada))
+>* [#188: fix print encode non utf 8 strings ](https://github.com/JakeWharton/pidcat/pull/188) (by [michael2to3](https://github.com/michael2to3))
+>* [#179: Fix Issue #178 and bump version to 2.1.1](https://github.com/JakeWharton/pidcat/pull/179) (by [ozziefallick](https://github.com/ozziefallick))
+>* [#174: Fixes #165](https://github.com/JakeWharton/pidcat/pull/174) (by [ramanr1](https://github.com/ramanr1))
+>* [#166: Add alternate buffer argument, fixes (#128)](https://github.com/JakeWharton/pidcat/pull/166) (by [michalkielan](https://github.com/michalkielan))
+>* [#152: Handle processes with <package>:<process> format](https://github.com/JakeWharton/pidcat/pull/152) (by [nickpalmer](https://github.com/nickpalmer))
+>* [#145: Fix blank line cause silent quit.](https://github.com/JakeWharton/pidcat/pull/145) (by [nomadalex](https://github.com/nomadalex))
+>* [#135: Add option --proguard-mapping to interpret class names correctly when using proguard](https://github.com/JakeWharton/pidcat/pull/135) (by [fcamel](https://github.com/fcamel))
+>* [#133: Set terminal title to current device/emulator name.](https://github.com/JakeWharton/pidcat/pull/133) (by [colriot](https://github.com/colriot))
+>* [#131: --colorized argument added for colorized log messages](https://github.com/JakeWharton/pidcat/pull/131) (by [faruktoptas](https://github.com/faruktoptas))
+>* [#121: Handle case when passing --current with no running application](https://github.com/JakeWharton/pidcat/pull/121) (by [tokou](https://github.com/tokou))
+>* [#119: fix bash completion of package names for the filter arg](https://github.com/JakeWharton/pidcat/pull/119) (by [eighthave](https://github.com/eighthave))
+>* [#118: Add timestamps to each message](https://github.com/JakeWharton/pidcat/pull/118) (by [vibhavsinha](https://github.com/vibhavsinha))
+>* [#115: Feature : Global ignore list (Issue #79)](https://github.com/JakeWharton/pidcat/pull/115) (by [xgouchet](https://github.com/xgouchet))
+>* [#108: Colorization on Windows using colorama](https://github.com/JakeWharton/pidcat/pull/108) (by [oakkitten](https://github.com/oakkitten))
+>* [#100: add support for reading arguments from config files](https://github.com/JakeWharton/pidcat/pull/100) (by [ayvazjmm](https://github.com/ayvazjmm))
+
+
 An update to Jeff Sharkey's excellent [logcat color script][1] which only shows
 log entries for processes from a specific application package.
 
@@ -18,6 +38,8 @@ convenient development process.
 Here is an example of the output when running for the Google Plus app:
 
 ![Example screen](screen.png)
+
+
 
 
 Install
