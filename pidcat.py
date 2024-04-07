@@ -54,13 +54,16 @@ def split_or_empty(to_split: Optional[str], sep: str) -> list[str]:
 
 ENV_IGNORED_TAGS = split_or_empty(os.getenv("PIDCAT_IGNORED_TAGS"), ";")
 
-def arg_parse_regex_type(arg_value: str) -> Pattern:
-    if len(arg_value) > 2:
-        if arg_value[0] == "^":
-            arg_value = arg_value[1:]
-
-        if arg_value[-1] == "$":
-            arg_value = arg_value[-2:]
+PID_LINE = re.compile(r'^\w+\s+(\w+)\s+\w+\s+\w+\s+\w+\s+\w+\s+\w+\s+\w\s([\w|\.|:|\/]+)$')
+PID_START = re.compile(r'^.*: Start proc ([a-zA-Z0-9._:]+) for ([a-z]+ [^:]+): pid=(\d+) uid=(\d+) gids=(.*)$')
+PID_START_5_1 = re.compile(r'^.*: Start proc (\d+):([a-zA-Z0-9._:]+)/[a-z0-9]+ for (.*)$')
+PID_START_DALVIK = re.compile(r'^E/dalvikvm\(\s*(\d+)\): >>>>> ([a-zA-Z0-9._:]+) \[ userId:0 \| appId:(\d+) \]$')
+PID_KILL = re.compile(r'^Killing (\d+):([a-zA-Z0-9._:]+)/[^:]+: (.*)$')
+PID_LEAVE = re.compile(r'^No longer want ([a-zA-Z0-9._:]+) \(pid (\d+)\): .*$')
+PID_DEATH = re.compile(r'^Process ([a-zA-Z0-9._:]+) \(pid (\d+)\) has died.?$')
+LOG_LINE = re.compile(r'^[0-9-]+ ([0-9:.]+) ([A-Z])/(.+?)\( *(\d+)\): (.*?)$')
+BUG_LINE = re.compile(r'.*nativeGetEnabledTags.*')
+BACKTRACE_LINE = re.compile(r'^#(.*?)pc\s(.*?)$')
 
 
 def parse_regex_input(input_str: str) -> Pattern:
@@ -139,10 +142,194 @@ def print_line(line: str):
     pass
 
 
-def check_filter_arg_pattern(message: str, filter_pattern: Pattern):
-    return filter_pattern.match(message)
 def check_match_any_pattern(input_str: str, patterns: List[Pattern]):
     return any(pattern.match(input_str) for pattern in patterns)
+
+
+TERM_CACHE: dict[(Optional[int], Optional[int]), str] = {}
+
+
+def termcolor(fg: Optional[int] = None, bg: Optional[int] = None):
+    key = (fg, bg)
+    cached = TERM_CACHE.get(key, None)
+    if cached is not None:
+        return cached
+
+    codes = []
+    if fg is not None:
+        codes.append('3%d' % fg)
+
+    if bg is not None:
+        codes.append('10%d' % bg)
+
+    color = '\033[%sm' % ';'.join(codes) if codes else ''
+    TERM_CACHE[(fg, bg)] = color
+
+    return color
+
+
+def colorize(message, fg=None, bg=None):
+    return termcolor(fg, bg) + message + RESET if IS_TTY else message
+
+
+RULES: dict[Pattern, str] = {
+    # StrictMode policy violation; ~duration=319 ms: android.os.StrictMode$StrictModeDiskWriteViolation: policy=31
+    # violation=1
+    re.compile(r'^(StrictMode policy violation)(; ~duration=)(\d+ ms)'): (
+            r'%s\1%s\2%s\3%s' % (termcolor(RED), RESET, termcolor(YELLOW), RESET))
+}
+
+TAG_TYPES = {
+    'V': colorize(' V ', fg=WHITE, bg=BLACK),
+    'D': colorize(' D ', fg=BLACK, bg=BLUE),
+    'I': colorize(' I ', fg=BLACK, bg=GREEN),
+    'W': colorize(' W ', fg=BLACK, bg=YELLOW),
+    'E': colorize(' E ', fg=BLACK, bg=RED),
+    'F': colorize(' F ', fg=BLACK, bg=RED),
+}
+
+LAST_USED = [RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN]
+KNOWN_TAGS: dict[str, str] = {
+    'dalvikvm': WHITE,
+    'Process': WHITE,
+    'ActivityManager': WHITE,
+    'ActivityThread': WHITE,
+    'AndroidRuntime': CYAN,
+    'jdwp': WHITE,
+    'StrictMode': WHITE,
+    'DEBUG': YELLOW,
+}
+
+
+def allocate_color(tag: str):
+    # this will allocate a unique format for the given tag
+    # since we don't have very many colors, we always keep track of the LRU
+    if tag not in KNOWN_TAGS:
+        KNOWN_TAGS[tag] = LAST_USED[0]
+
+    color = KNOWN_TAGS[tag]
+    if color in LAST_USED:
+        LAST_USED.remove(color)
+        LAST_USED.append(color)
+
+    return color
+
+
+def init_colorama(force_windows_colors: bool):
+    try:
+        import colorama
+        colorama.init(convert=force_windows_colors)
+    except ImportError:
+        if force_windows_colors:
+            raise
+
+
+def setup_terminal_width(width: int) -> (any, int):
+    if width < 0:
+        try:
+            # Get the current terminal width
+            import fcntl, termios, struct
+            h, width = struct.unpack('hh', fcntl.ioctl(0, termios.TIOCGWINSZ, struct.pack('hh', 0, 0)))
+            return h, width
+        except:
+            pass
+
+
+def indent_wrap(width: int, header_size: int, message: str):
+    if width == -1:
+        return message
+
+    message = message.replace('\t', '    ')
+    wrap_area = width - header_size
+    message_buf = ''
+    current = 0
+
+    while current < len(message):
+        _next = min(current + wrap_area, len(message))
+        message_buf += message[current:_next]
+        if _next < len(message):
+            message_buf += '\n'
+            message_buf += ' ' * header_size
+        current = _next
+
+    return message_buf
+
+
+def match_packages(package: str, named_processes: set[str], catchall_package: set[str], token: str):
+    if len(package) == 0:
+        return True
+
+    if token in named_processes:
+        return True
+
+    index = token.find(':')
+    return (token in catchall_package) if index == -1 else (token[:index] in catchall_package)
+
+
+def try_parse_death(pattern: Pattern, message: str, pid_group: int = 2, package_line_group: int = 1) -> tuple[str, str]:
+    match = pattern.match(message)
+    if match:
+        pid = match.group(pid_group)
+        package_line = match.group(package_line_group)
+        return pid, package_line
+
+    return None, None
+
+
+def parse_death(package: str, named_processes: str, catchall_package: set[str], pids: set[str], tag: str,
+                message: str) -> tuple[str, str]:
+    if tag != 'ActivityManager':
+        return None, None
+
+    killed = try_parse_death(PID_KILL, message, 1, 2)
+    if killed and match_packages(package, named_processes, catchall_package, killed[1]) and killed[0] in pids:
+        return killed
+
+    left = try_parse_death(PID_LEAVE, message)
+    if left and match_packages(package, named_processes, catchall_package, left[1]) and left[0] in pids:
+        return left
+
+    died = try_parse_death(PID_LEAVE, message)
+    if died and match_packages(package, named_processes, catchall_package, died[1]) and died[0] in pids:
+        return died
+
+    return None, None
+
+
+def parse_start_process(line: str):
+    start = PID_START_5_1.match(line)
+    if start:
+        line_pid, line_package, target = start.groups()
+        return line_package, target, line_pid, '', ''
+
+    start = PID_START.match(line)
+    if start:
+        line_package, target, line_pid, line_uid, line_gids = start.groups()
+        return line_package, target, line_pid, line_uid, line_gids
+
+    start = PID_START_DALVIK.match(line)
+    if start:
+        line_pid, line_package, line_uid = start.groups()
+        return line_package, '', line_pid, line_uid, ''
+
+    return None
+
+
+def set_term_title(title):
+    sys.stdout.write("\033]0;%s\a" % title)
+
+
+def clear_term_title():
+    set_term_title("")
+
+
+# This is a ducktype of the subprocess.Popen object
+class FakeStdInProcess:
+    def __init__(self):
+        self.stdout = sys.stdin
+
+    def poll(self):
+        return None
 
 
 def main():
@@ -191,89 +378,25 @@ def main():
         args.all = True
 
     # Store the names of packages for which to match all processes.
-    catchall_package = list(filter(lambda package: package.find(":") == -1, package))
+    catchall_package = set(filter(lambda pkg: pkg.find(":") == -1, package))
+
     # Store the name of processes to match exactly.
-    named_processes = list(filter(lambda package: package.find(":") != -1, package))
-    # Convert default process names from <package>: (cli notation) to <package> (android notation) in the exact names match group.
-    named_processes = map(lambda package: package if package.find(":") != len(package) - 1 else package[:-1],
-                          named_processes)
+    named_processes = set(filter(lambda pkg: pkg.find(":") != -1, package))
+
+    # Convert default process names from <package>: (cli notation) to <package> (android notation) in the exact names
+    # match group.
+    named_processes = set([pkg if pkg.find(":") != len(pkg) - 1 else pkg[:-1] for pkg in named_processes])
 
     header_size = args.tag_width + 1 + 3 + 1  # space, level, space
     if args.add_timestamp:
         header_size += 12 + 1  # time, space
 
-    stdout_isatty = sys.stdout.isatty()
-
     width = args.width
-    if width < 0:
-        try:
-            # Get the current terminal width
-            import fcntl, termios, struct
+    new_size = setup_terminal_width(width)
+    if new_size:
+        h, width = new_size
 
-            h, width = struct.unpack('hh', fcntl.ioctl(0, termios.TIOCGWINSZ, struct.pack('hh', 0, 0)))
-        except:
-            pass
-
-    try:
-        import colorama
-        colorama.init(convert=args.force_windows_colors)
-    except ImportError:
-        if args.force_windows_colors:
-            raise
-
-    def termcolor(fg=None, bg=None):
-        codes = []
-        if fg is not None: codes.append('3%d' % fg)
-        if bg is not None: codes.append('10%d' % bg)
-        return '\033[%sm' % ';'.join(codes) if codes else ''
-
-    def colorize(message, fg=None, bg=None):
-        return termcolor(fg, bg) + message + RESET if stdout_isatty else message
-
-    def indent_wrap(message):
-        if width == -1:
-            return message
-        message = message.replace('\t', '    ')
-        wrap_area = width - header_size
-        messagebuf = ''
-        current = 0
-        while current < len(message):
-            next = min(current + wrap_area, len(message))
-            messagebuf += message[current:next]
-            if next < len(message):
-                messagebuf += '\n'
-                messagebuf += ' ' * header_size
-            current = next
-        return messagebuf
-
-    LAST_USED = [RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN]
-    KNOWN_TAGS = {
-        'dalvikvm': WHITE,
-        'Process': WHITE,
-        'ActivityManager': WHITE,
-        'ActivityThread': WHITE,
-        'AndroidRuntime': CYAN,
-        'jdwp': WHITE,
-        'StrictMode': WHITE,
-        'DEBUG': YELLOW,
-    }
-
-    def allocate_color(tag):
-        # this will allocate a unique format for the given tag
-        # since we dont have very many colors, we always keep track of the LRU
-        if tag not in KNOWN_TAGS:
-            KNOWN_TAGS[tag] = LAST_USED[0]
-        color = KNOWN_TAGS[tag]
-        if color in LAST_USED:
-            LAST_USED.remove(color)
-            LAST_USED.append(color)
-        return color
-
-    RULES = {
-        # StrictMode policy violation; ~duration=319 ms: android.os.StrictMode$StrictModeDiskWriteViolation: policy=31 violation=1
-        re.compile(r'^(StrictMode policy violation)(; ~duration=)(\d+ ms)')
-        : r'%s\1%s\2%s\3%s' % (termcolor(RED), RESET, termcolor(YELLOW), RESET),
-    }
+    init_colorama(args.force_windows_colors)
 
     # Only enable GC coloring if the user opted-in
     if args.color_gc:
@@ -283,32 +406,6 @@ def main():
         val = r'\1%s\2%s\3%s\4%s' % (termcolor(GREEN), RESET, termcolor(YELLOW), RESET)
 
         RULES[key] = val
-
-    TAGTYPES = {
-        'V': colorize(' V ', fg=WHITE, bg=BLACK),
-        'D': colorize(' D ', fg=BLACK, bg=BLUE),
-        'I': colorize(' I ', fg=BLACK, bg=GREEN),
-        'W': colorize(' W ', fg=BLACK, bg=YELLOW),
-        'E': colorize(' E ', fg=BLACK, bg=RED),
-        'F': colorize(' F ', fg=BLACK, bg=RED),
-    }
-
-    PID_LINE = re.compile(r'^\w+\s+(\w+)\s+\w+\s+\w+\s+\w+\s+\w+\s+\w+\s+\w\s([\w|\.|:|\/]+)$')
-    PID_START = re.compile(r'^.*: Start proc ([a-zA-Z0-9._:]+) for ([a-z]+ [^:]+): pid=(\d+) uid=(\d+) gids=(.*)$')
-    PID_START_5_1 = re.compile(r'^.*: Start proc (\d+):([a-zA-Z0-9._:]+)/[a-z0-9]+ for (.*)$')
-    PID_START_DALVIK = re.compile(r'^E/dalvikvm\(\s*(\d+)\): >>>>> ([a-zA-Z0-9._:]+) \[ userId:0 \| appId:(\d+) \]$')
-    PID_KILL = re.compile(r'^Killing (\d+):([a-zA-Z0-9._:]+)/[^:]+: (.*)$')
-    PID_LEAVE = re.compile(r'^No longer want ([a-zA-Z0-9._:]+) \(pid (\d+)\): .*$')
-    PID_DEATH = re.compile(r'^Process ([a-zA-Z0-9._:]+) \(pid (\d+)\) has died.?$')
-    LOG_LINE = re.compile(r'^[0-9-]+ ([0-9:.]+) ([A-Z])/(.+?)\( *(\d+)\): (.*?)$')
-    BUG_LINE = re.compile(r'.*nativeGetEnabledTags.*')
-    BACKTRACE_LINE = re.compile(r'^#(.*?)pc\s(.*?)$')
-
-    def set_term_title(title):
-        sys.stdout.write("\033]0;%s\a" % title)
-
-    def clear_term_title():
-        set_term_title("")
 
     device_name_command = base_adb_command + ["shell", "getprop", "ro.product.model"]
     device_name = subprocess.Popen(device_name_command, stdout=PIPE, stderr=PIPE).communicate()[0]
@@ -331,67 +428,14 @@ def main():
         while adb_clear.poll() is None:
             pass
 
-    # This is a ducktype of the subprocess.Popen object
-    class FakeStdinProcess():
-        def __init__(self):
-            self.stdout = sys.stdin
-
-        def poll(self):
-            return None
-
     if sys.stdin.isatty():
         adb = subprocess.Popen(adb_command, stdin=PIPE, stdout=PIPE)
     else:
-        adb = FakeStdinProcess()
-    pids = set()
+        adb = FakeStdInProcess()
+
+    pids: set[str] = set()
     last_tag = None
     app_pid = None
-
-    def match_packages(token):
-        if len(package) == 0:
-            return True
-        if token in named_processes:
-            return True
-        index = token.find(':')
-        return (token in catchall_package) if index == -1 else (token[:index] in catchall_package)
-
-    def parse_death(tag, message):
-        if tag != 'ActivityManager':
-            return None, None
-        kill = PID_KILL.match(message)
-        if kill:
-            pid = kill.group(1)
-            package_line = kill.group(2)
-            if match_packages(package_line) and pid in pids:
-                return pid, package_line
-        leave = PID_LEAVE.match(message)
-        if leave:
-            pid = leave.group(2)
-            package_line = leave.group(1)
-            if match_packages(package_line) and pid in pids:
-                return pid, package_line
-        death = PID_DEATH.match(message)
-        if death:
-            pid = death.group(2)
-            package_line = death.group(1)
-            if match_packages(package_line) and pid in pids:
-                return pid, package_line
-        return None, None
-
-    def parse_start_proc(line):
-        start = PID_START_5_1.match(line)
-        if start is not None:
-            line_pid, line_package, target = start.groups()
-            return line_package, target, line_pid, '', ''
-        start = PID_START.match(line)
-        if start is not None:
-            line_package, target, line_pid, line_uid, line_gids = start.groups()
-            return line_package, target, line_pid, line_uid, line_gids
-        start = PID_START_DALVIK.match(line)
-        if start is not None:
-            line_pid, line_package, line_uid = start.groups()
-            return line_package, '', line_pid, line_uid, ''
-        return None
 
     ps_command = base_adb_command + ['shell', 'ps']
     ps_pid = subprocess.Popen(ps_command, stdin=PIPE, stdout=PIPE, stderr=PIPE)
@@ -437,24 +481,24 @@ def main():
         time, level, tag, owner, message = log_line.groups()
         tag = tag.strip()
         tag = proguard_mapping.get(tag, tag)
-        start = parse_start_proc(line)
+        start = parse_start_process(line)
         if start:
             line_package, target, line_pid, line_uid, line_gids = start
-            if match_packages(line_package):
+            if match_packages(package, named_processes, catchall_package, line_package):
                 pids.add(line_pid)
 
                 app_pid = line_pid
 
                 line_buffer = '\n'
                 line_buffer += colorize(' ' * (header_size - 1), bg=WHITE)
-                line_buffer += indent_wrap(' Process %s created for %s\n' % (line_package, target))
+                line_buffer += indent_wrap(width, header_size, ' Process %s created for %s\n' % (line_package, target))
                 line_buffer += colorize(' ' * (header_size - 1), bg=WHITE)
                 line_buffer += ' PID: %s   UID: %s   GIDs: %s' % (line_pid, line_uid, line_gids)
                 line_buffer += '\n'
                 print_line(line_buffer)
                 last_tag = None  # Ensure next log gets a tag printed
 
-        dead_pid, dead_pname = parse_death(tag, message)
+        dead_pid, dead_pname = parse_death(package, named_processes, catchall_package, pids, tag, message)
         if dead_pid:
             pids.remove(dead_pid)
             line_buffer = '\n'
@@ -498,8 +542,8 @@ def main():
             line_buffer += ' '
 
         # write out level colored edge
-        if level in TAGTYPES:
-            line_buffer += TAGTYPES[level]
+        if level in TAG_TYPES:
+            line_buffer += TAG_TYPES[level]
         else:
             line_buffer += ' ' + level + ' '
         line_buffer += ' '
@@ -512,7 +556,7 @@ def main():
             message = matcher.sub(replace, message)
 
         line_foreground = color if args.colorized else WHITE
-        line_buffer += indent_wrap(colorize(message, fg=line_foreground))
+        line_buffer += indent_wrap(width, header_size, colorize(message, fg=line_foreground))
         if sys.stdout.encoding.upper() not in ['UTF-8', 'UTF8']:
             print_line(line_buffer.encode('utf-8'))
         else:
