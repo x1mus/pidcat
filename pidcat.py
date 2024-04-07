@@ -181,7 +181,7 @@ def termcolor(fg: Optional[int] = None, bg: Optional[int] = None):
     return color
 
 
-def colorize(message, fg=None, bg=None):
+def colorize(message: str, fg: Optional[int] = None, bg: Optional[int] = None):
     return termcolor(fg, bg) + message + RESET if IS_TTY else message
 
 
@@ -202,7 +202,7 @@ TAG_TYPES = {
 }
 
 LAST_USED: deque[int] = deque([RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN])
-KNOWN_TAGS: dict[str, str] = {
+KNOWN_TAGS: dict[str, int] = {
     'dalvikvm': WHITE,
     'Process': WHITE,
     'ActivityManager': WHITE,
@@ -214,12 +214,16 @@ KNOWN_TAGS: dict[str, str] = {
 }
 
 
-def allocate_color(tag: str) -> str:
+def allocate_color(tag: str) -> int:
     # this will allocate a unique format for the given tag
     # since we don't have very many colors, we always keep track of the LRU
-    color = KNOWN_TAGS.get(tag, LAST_USED.popleft())
-    LAST_USED.append(color)
-    return color
+    color = KNOWN_TAGS.get(tag, None)
+    first_color = LAST_USED.popleft()
+    if color is None:
+        KNOWN_TAGS[tag] = first_color
+
+    LAST_USED.append(first_color)
+    return first_color
 
 
 def init_colorama(force_windows_colors: bool):
@@ -304,11 +308,11 @@ def parse_death(package: str, named_processes: str, catchall_package: set[str], 
     return None
 
 
-def parse_start_process(line: str):
+def parse_start_process(line: str) -> Optional[tuple[str, str, str, str, str]]:
     start = PID_START_5_1.match(line)
     if start:
         line_pid, line_package, target = start.groups()
-        return line_package, target, line_pid, '', ''
+        return line_package, target, line_pid, "-", "-"
 
     start = PID_START.match(line)
     if start:
@@ -318,7 +322,7 @@ def parse_start_process(line: str):
     start = PID_START_DALVIK.match(line)
     if start:
         line_pid, line_package, line_uid = start.groups()
-        return line_package, '', line_pid, line_uid, ''
+        return line_package, "-", line_pid, line_uid, "-"
 
     return None
 
@@ -338,6 +342,33 @@ class FakeStdInProcess:
 
     def poll(self):
         return None
+
+
+def indent_tag(tag_width: int, tag: str, create_tag: bool) -> tuple[Optional[int], str]:
+    if tag_width > 0:
+        # right-align tag title and allocate color if needed
+        if create_tag:
+            color = allocate_color(tag)
+            tag = tag[-tag_width:].rjust(tag_width)
+            return color, colorize(tag, fg=color) + " "
+        else:
+            return None, " " * (tag_width + 1)
+
+    return None, ""
+
+
+def create_tag_level(level: str) -> str:
+    if level in TAG_TYPES:
+        return TAG_TYPES[level]
+
+    return level
+
+
+def prepend_time(line_buffer: str, time: str, add_timestamp: bool) -> str:
+    if add_timestamp:
+        return f"{time} {line_buffer}"
+
+    return line_buffer
 
 
 def main():
@@ -468,6 +499,8 @@ def main():
 
     compiled_env_ignore_tags = parse_regex_inputs(ENV_IGNORED_TAGS)
 
+    last_color = None
+    print_counter = 0
     while adb.poll() is None:
         try:
             line = adb.stdout.readline()
@@ -492,6 +525,7 @@ def main():
         tag = tag.strip()
         tag = proguard_mapping.get(tag, tag)
         start = parse_start_process(line)
+
         if start:
             line_package, target, line_pid, line_uid, line_gids = start
             if match_packages(package, named_processes, catchall_package, line_package):
@@ -540,27 +574,16 @@ def main():
         if len(compiled_env_ignore_tags) > 0 and check_match_any_pattern(tag, compiled_env_ignore_tags):
             continue
 
-        line_buffer = ''
+        create_tag = tag != last_tag or args.always_tags
+        color, line_buffer = indent_tag(args.tag_width, tag, create_tag)
+        if create_tag:
+            last_tag = tag
+            last_color = color
+        elif last_color is not None:
+            color = last_color
 
-        if args.tag_width > 0:
-            # right-align tag title and allocate color if needed
-            if tag != last_tag or args.always_tags:
-                last_tag = tag
-                color = allocate_color(tag)
-                tag = tag[-args.tag_width:].rjust(args.tag_width)
-                line_buffer += colorize(tag, fg=color)
-            else:
-                line_buffer += ' ' * args.tag_width
-            line_buffer += ' '
-
-        # write out level colored edge
-        if level in TAG_TYPES:
-            line_buffer += TAG_TYPES[level]
-        else:
-            line_buffer += ' ' + level + ' '
-        line_buffer += ' '
-        if args.add_timestamp:
-            line_buffer = time + ' ' + line_buffer
+        line_buffer += create_tag_level(level) + " "
+        line_buffer = prepend_time(line_buffer, time, args.add_timestamp)
 
         # format tag message using rules
         for matcher in RULES:
@@ -570,6 +593,7 @@ def main():
         line_foreground = color if args.colorized else WHITE
         line_buffer += indent_wrap(width, header_size, colorize(message, fg=line_foreground))
         print_line(line_buffer)
+        print_counter += 1
 
     clear_term_title()
 
