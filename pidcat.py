@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 from subprocess import PIPE
+from collections import deque
 
 __version__ = '2.2.0-unofficial'
 
@@ -188,7 +189,7 @@ TAG_TYPES = {
     'F': colorize(' F ', fg=BLACK, bg=RED),
 }
 
-LAST_USED = [RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN]
+LAST_USED: deque[int] = deque([RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN])
 KNOWN_TAGS: dict[str, str] = {
     'dalvikvm': WHITE,
     'Process': WHITE,
@@ -201,17 +202,11 @@ KNOWN_TAGS: dict[str, str] = {
 }
 
 
-def allocate_color(tag: str):
+def allocate_color(tag: str) -> str:
     # this will allocate a unique format for the given tag
     # since we don't have very many colors, we always keep track of the LRU
-    if tag not in KNOWN_TAGS:
-        KNOWN_TAGS[tag] = LAST_USED[0]
-
-    color = KNOWN_TAGS[tag]
-    if color in LAST_USED:
-        LAST_USED.remove(color)
-        LAST_USED.append(color)
-
+    color = KNOWN_TAGS.get(tag, LAST_USED.popleft())
+    LAST_USED.append(color)
     return color
 
 
