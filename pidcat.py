@@ -72,7 +72,7 @@ def parse_args(argv):
                         help='Colorize log messages as well')
     parser.add_argument('--timestamp', dest='add_timestamp', action='store_true',
                         help='Prepend each line of output with the current time.')
-    parser.add_argument('-f', '--force-windows-colors', dest='force_windows_colors', action='store_true', default=False,
+    parser.add_argument('--force-windows-colors', dest='force_windows_colors', action='store_true', default=False,
                         help='Force converting colors to Windows format')
 
     return parser.parse_args(argv)
