@@ -55,6 +55,17 @@ Include these lines in your `.bashrc` or `.zshrc`.
 
 *Note:* `<path to Android SDK>` should be absolute and not relative.
 
+Configuration
+-------------
+
+Arguments can be specified at the command line or in one of the following config files: ~/.pidcat.conf or ./.pidcat.conf
+
+         cat ~/.pidcat.conf
+         --min-level=D
+
+Dependencies
+------------
+
 `pidcat` requires at least version 8.30 of `coreutils`. Ubuntu 20.04 LTS already ships
 with it, for 18.04 and below, `coreutils` can be upgraded from the `focal` repo by running
 the following:

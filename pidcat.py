@@ -22,6 +22,7 @@ limitations under the License.
 # Package filtering and output improvements by Jake Wharton, http://jakewharton.com
 
 import argparse
+import os
 import sys
 import re
 import os
@@ -30,9 +31,10 @@ from subprocess import PIPE
 
 __version__ = '2.1.1'
 
+FROMFILE_PREFIX='@'
 LOG_LEVELS = 'VDIWEF'
 LOG_LEVELS_MAP = dict([(LOG_LEVELS[i], i) for i in range(len(LOG_LEVELS))])
-parser = argparse.ArgumentParser(description='Filter logcat by package name')
+parser = argparse.ArgumentParser(description='Filter logcat by package name', fromfile_prefix_chars=FROMFILE_PREFIX)
 parser.add_argument('package', nargs='*', help='Application package name(s)')
 parser.add_argument('-w', '--tag-width', metavar='N', dest='tag_width', type=int, default=23, help='Width of log tag')
 parser.add_argument('-l', '--min-level', dest='min_level', type=str, choices=LOG_LEVELS+LOG_LEVELS.lower(), default='V', help='Minimum level to be displayed')
@@ -54,7 +56,10 @@ parser.add_argument('--colorized', '--colorized', dest='colorized', action='stor
 parser.add_argument('--timestamp', dest='add_timestamp', action='store_true', help='Prepend each line of output with the current time.')
 parser.add_argument('-f', '--force-windows-colors', dest='force_windows_colors', action='store_true', default=False, help='Force converting colors to Windows format')
 
-args = parser.parse_args()
+CONF_FILES = [ os.path.expanduser('~/.pidcat.conf'), './.pidcat.conf' ]
+argv = [ '%s%s' % (FROMFILE_PREFIX, conf) for conf in CONF_FILES if os.path.isfile(conf) ]
+argv.extend(sys.argv[1:])
+args = parser.parse_args(argv)
 min_level = LOG_LEVELS_MAP[args.min_level.upper()]
 
 package = args.package
