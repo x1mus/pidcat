@@ -344,11 +344,11 @@ class FakeStdInProcess:
         return None
 
 
-def indent_tag(tag_width: int, tag: str, create_tag: bool) -> tuple[Optional[int], str]:
+def indent_tag(tag_width: int, tag: str, create_tag: bool, force_color: Optional[int] = None) -> tuple[Optional[int], str]:
     if tag_width > 0:
         # right-align tag title and allocate color if needed
         if create_tag:
-            color = allocate_color(tag)
+            color = force_color if force_color else allocate_color(tag)
             tag = tag[-tag_width:].rjust(tag_width)
             return color, colorize(tag, fg=color) + " "
         else:
@@ -533,25 +533,50 @@ def main():
 
                 app_pid = line_pid
 
-                line_buffer = '\n'
-                line_buffer += colorize(' ' * (header_size - 1), bg=WHITE)
-                line_buffer += indent_wrap(width, header_size, ' Process %s created for %s\n' % (line_package, target))
-                line_buffer += colorize(' ' * (header_size - 1), bg=WHITE)
-                line_buffer += ' PID: %s   UID: %s   GIDs: %s' % (line_pid, line_uid, line_gids)
-                line_buffer += '\n'
-                print_line(line_buffer)
+                color, line_buffer = indent_tag(args.tag_width, "Process started", True, force_color=GREEN)
+                level = colorize(" # ", fg=BLACK, bg=GREEN)
+
+                line_buffer += level + " "
+                line_buffer = prepend_time(line_buffer, time, args.add_timestamp)
+                line_foreground = color if args.colorized else WHITE
+
+                message_1 = f"Process {line_package.strip()} created for {target.strip()}"
+                message_2 = f"PID: {line_pid}\tUID: {line_uid}\tGIDs: {line_gids}"
+
+                if print_counter > 0:
+                    print_line("\n")
+
+                print_line(colorize((header_size - 4) * " ", bg=GREEN) + level)
+                print_line(line_buffer + indent_wrap(width, header_size, colorize(message_1, fg=line_foreground)))
+                print_line(line_buffer + indent_wrap(width, header_size, colorize(message_2, fg=line_foreground)))
+                print_counter += 3
+
+                # line_buffer += '\nPID: %s   UID: %s   GIDs: %s' % (line_pid, line_uid, line_gids)
+                # line_buffer += '\n'
+
                 last_tag = None  # Ensure next log gets a tag printed
 
         dead = parse_death(package, named_processes, catchall_package, pids, tag, message)
         if dead:
             dead_pid, dead_pname = dead
-
             pids.remove(dead_pid)
-            line_buffer = '\n'
-            line_buffer += colorize(' ' * (header_size - 1), bg=RED)
-            line_buffer += ' Process %s (PID: %s) ended' % (dead_pname, dead_pid)
-            line_buffer += '\n'
-            print_line(line_buffer)
+
+            color, line_buffer = indent_tag(args.tag_width, "Process ended", True, force_color=RED)
+            level = colorize(" ~ ", fg=BLACK, bg=RED)
+
+            line_buffer += level + " "
+            line_buffer = prepend_time(line_buffer, time, args.add_timestamp)
+            line_foreground = color if args.colorized else WHITE
+
+            message = f"Process {dead_pname} (PID: {dead_pid}) ended"
+
+            if print_counter > 0:
+                print_line("\n")
+
+            print_line(colorize((header_size - 4) * " ", bg=RED) + level)
+            print_line(line_buffer + indent_wrap(width, header_size, colorize(message, fg=line_foreground)))
+            print_counter += 2
+
             last_tag = None  # Ensure next log gets a tag printed
 
         # Make sure the backtrace is printed after a native crash
