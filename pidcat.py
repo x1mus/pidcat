@@ -1,6 +1,6 @@
 #!/usr/bin/env -S python -u
 
-'''
+"""
 Copyright 2009, The Android Open Source Project
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +14,7 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-'''
+"""
 
 # Script to highlight adb logcat output for console
 # Originally written by Jeff Sharkey, http://jsharkey.org/
@@ -28,13 +28,16 @@ import os
 import subprocess
 from subprocess import PIPE
 
-__version__ = '2.2.0'
+__version__ = '2.2.0-unofficial'
 
 FROMFILE_PREFIX = '@'
 CONF_FILES = [os.path.expanduser('~/.pidcat.conf'), './.pidcat.conf']
 
 LOG_LEVELS = 'VDIWEF'
 LOG_LEVELS_MAP = dict([(LOG_LEVELS[i], i) for i in range(len(LOG_LEVELS))])
+PROGUARD_MAPPING = re.compile(r'^([\w$\.]+)\s->\s*([\w$\.]+)')
+BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
+RESET = '\033[0m'
 
 
 def parse_args(argv):
@@ -110,8 +113,6 @@ def main():
         except:
             pass
 
-    PROGUARD_MAPPING = re.compile(r'^([\w$\.]+)\s->\s*([\w$\.]+)')
-
     proguard_mapping = {}
     if args.proguard_mapping:
         with open(args.proguard_mapping) as fr:
@@ -151,15 +152,10 @@ def main():
 
     try:
         import colorama
-
         colorama.init(convert=args.force_windows_colors)
     except ImportError:
         if args.force_windows_colors:
             raise
-
-    BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
-
-    RESET = '\033[0m'
 
     def termcolor(fg=None, bg=None):
         codes = []
@@ -392,23 +388,23 @@ def main():
 
                 app_pid = line_pid
 
-                linebuf = '\n'
-                linebuf += colorize(' ' * (header_size - 1), bg=WHITE)
-                linebuf += indent_wrap(' Process %s created for %s\n' % (line_package, target))
-                linebuf += colorize(' ' * (header_size - 1), bg=WHITE)
-                linebuf += ' PID: %s   UID: %s   GIDs: %s' % (line_pid, line_uid, line_gids)
-                linebuf += '\n'
-                print(linebuf)
+                line_buffer = '\n'
+                line_buffer += colorize(' ' * (header_size - 1), bg=WHITE)
+                line_buffer += indent_wrap(' Process %s created for %s\n' % (line_package, target))
+                line_buffer += colorize(' ' * (header_size - 1), bg=WHITE)
+                line_buffer += ' PID: %s   UID: %s   GIDs: %s' % (line_pid, line_uid, line_gids)
+                line_buffer += '\n'
+                print(line_buffer)
                 last_tag = None  # Ensure next log gets a tag printed
 
         dead_pid, dead_pname = parse_death(tag, message)
         if dead_pid:
             pids.remove(dead_pid)
-            linebuf = '\n'
-            linebuf += colorize(' ' * (header_size - 1), bg=RED)
-            linebuf += ' Process %s (PID: %s) ended' % (dead_pname, dead_pid)
-            linebuf += '\n'
-            print(linebuf)
+            line_buffer = '\n'
+            line_buffer += colorize(' ' * (header_size - 1), bg=RED)
+            line_buffer += ' Process %s (PID: %s) ended' % (dead_pname, dead_pid)
+            line_buffer += '\n'
+            print(line_buffer)
             last_tag = None  # Ensure next log gets a tag printed
 
         # Make sure the backtrace is printed after a native crash
@@ -431,7 +427,7 @@ def main():
         if tag_in_tags_regex(tag, ENV_IGNORED_TAGS):
             continue
 
-        linebuf = ''
+        line_buffer = ''
 
         if args.tag_width > 0:
             # right-align tag title and allocate color if needed
@@ -439,31 +435,31 @@ def main():
                 last_tag = tag
                 color = allocate_color(tag)
                 tag = tag[-args.tag_width:].rjust(args.tag_width)
-                linebuf += colorize(tag, fg=color)
+                line_buffer += colorize(tag, fg=color)
             else:
-                linebuf += ' ' * args.tag_width
-            linebuf += ' '
+                line_buffer += ' ' * args.tag_width
+            line_buffer += ' '
 
         # write out level colored edge
         if level in TAGTYPES:
-            linebuf += TAGTYPES[level]
+            line_buffer += TAGTYPES[level]
         else:
-            linebuf += ' ' + level + ' '
-        linebuf += ' '
+            line_buffer += ' ' + level + ' '
+        line_buffer += ' '
         if args.add_timestamp:
-            linebuf = time + ' ' + linebuf
+            line_buffer = time + ' ' + line_buffer
 
         # format tag message using rules
         for matcher in RULES:
             replace = RULES[matcher]
             message = matcher.sub(replace, message)
 
-        lineFg = color if args.colorized else WHITE
-        linebuf += indent_wrap(colorize(message, fg=lineFg))
+        line_foreground = color if args.colorized else WHITE
+        line_buffer += indent_wrap(colorize(message, fg=line_foreground))
         if sys.stdout.encoding.upper() not in ['UTF-8', 'UTF8']:
-            print(linebuf.encode('utf-8'))
+            print(line_buffer.encode('utf-8'))
         else:
-            print(linebuf)
+            print(line_buffer)
 
     clear_term_title()
 
