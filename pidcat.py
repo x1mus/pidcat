@@ -22,13 +22,15 @@ limitations under the License.
 # Package filtering and output improvements by Jake Wharton, http://jakewharton.com
 
 import argparse
-import sys
-import re
 import os
+import re
 import subprocess
+import sys
 from subprocess import PIPE
 
 __version__ = '2.2.0-unofficial'
+
+from typing import Pattern, List, Optional
 
 FROMFILE_PREFIX = '@'
 CONF_FILES = [os.path.expanduser('~/.pidcat.conf'), './.pidcat.conf']
@@ -36,8 +38,51 @@ CONF_FILES = [os.path.expanduser('~/.pidcat.conf'), './.pidcat.conf']
 LOG_LEVELS = 'VDIWEF'
 LOG_LEVELS_MAP = dict([(LOG_LEVELS[i], i) for i in range(len(LOG_LEVELS))])
 PROGUARD_MAPPING = re.compile(r'^([\w$\.]+)\s->\s*([\w$\.]+)')
+
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
 RESET = '\033[0m'
+
+IS_TTY = sys.stdout.isatty()
+
+
+def split_or_empty(to_split: Optional[str], sep: str) -> list[str]:
+    if to_split is None:
+        return []
+
+    return to_split.split(sep)
+
+
+ENV_IGNORED_TAGS = split_or_empty(os.getenv("PIDCAT_IGNORED_TAGS"), ";")
+
+def arg_parse_regex_type(arg_value: str) -> Pattern:
+    if len(arg_value) > 2:
+        if arg_value[0] == "^":
+            arg_value = arg_value[1:]
+
+        if arg_value[-1] == "$":
+            arg_value = arg_value[-2:]
+
+
+def parse_regex_input(input_str: str) -> Pattern:
+    input_str = input_str.strip()
+
+    if len(input_str) == 0:
+        raise argparse.ArgumentTypeError("Regex must not be empty!")
+
+    if input_str[0] != "^":
+        input_str = "^" + input_str
+
+    if input_str[-1] != "$":
+        input_str += "$"
+
+    try:
+        return re.compile(input_str)
+    except Exception as e:
+        raise e
+
+
+def parse_regex_inputs(input_strs: list[str]) -> list[Pattern]:
+    return [parse_regex_input(_str) for _str in input_strs]
 
 
 def parse_args(argv):
@@ -63,11 +108,18 @@ def parse_args(argv):
     parser.add_argument('-c', '--clear', dest='clear_logcat', action='store_true',
                         help='Clear the entire log before running')
     parser.add_argument('-t', '--tag', dest='tag', action='append', help='Filter output by specified tag(s)')
-    parser.add_argument('-i', '--ignore-tag', dest='ignored_tag', action='append',
-                        help='Filter output by ignoring specified tag(s)')
+    parser.add_argument('-i', '--ignore-tag', dest='ignored_tag', type=parse_regex_input, action='extend', nargs='+',
+                        help='Filter output by ignoring tag(s) matching the given regex')
     parser.add_argument('--proguard-mapping', dest='proguard_mapping', action='store',
                         help='Use proguard mapping to translate the input tag names')
-    parser.add_argument('-m', '--msgs', dest='msg', action='append', help='Only output messages with regex(s)')
+
+    # TODO: Add simple contains filter, make --filter and --contains mutually exclusive
+    parser.add_argument('--filter', dest='filter', type=parse_regex_input, action='extend', nargs='+',
+                        help='Only output messages matching the given regex; Input will be wrapped in ^$; Regex is '
+                             'case-sensitive')
+    # parser.add_argument('--contains', dest='filter', action='store',
+    #                     help='Only output messages matching the given regex')
+
     parser.add_argument('-v', '--version', action='version', version='%(prog)s ' + __version__,
                         help='Print the version number and exit')
     parser.add_argument('-a', '--all', dest='all', action='store_true', default=False, help='Print all log messages')
@@ -79,6 +131,18 @@ def parse_args(argv):
                         help='Force converting colors to Windows format')
 
     return parser.parse_args(argv)
+
+
+def print_line(line: str):
+    # Make development more straightforward by allowing all prints to be commented out in a single place
+    print(line)
+    pass
+
+
+def check_filter_arg_pattern(message: str, filter_pattern: Pattern):
+    return filter_pattern.match(message)
+def check_match_any_pattern(input_str: str, patterns: List[Pattern]):
+    return any(pattern.match(input_str) for pattern in patterns)
 
 
 def main():
@@ -193,8 +257,6 @@ def main():
         'StrictMode': WHITE,
         'DEBUG': YELLOW,
     }
-
-    ENV_IGNORED_TAGS = os.getenv('PIDCAT_IGNORED_TAGS', "").split(';')
 
     def allocate_color(tag):
         # this will allocate a unique format for the given tag
@@ -331,12 +393,6 @@ def main():
             return line_package, '', line_pid, line_uid, ''
         return None
 
-    def tag_in_tags_regex(tag, tags):
-        return any(re.match(r'^' + t + r'$', tag) for t in map(str.strip, tags))
-
-    def msg_in_msgs_regex(msg, msgs):
-        return any(re.match('.*' + t + r'.*', msg) for t in map(str.strip, msgs))
-
     ps_command = base_adb_command + ['shell', 'ps']
     ps_pid = subprocess.Popen(ps_command, stdin=PIPE, stdout=PIPE, stderr=PIPE)
     while True:
@@ -357,6 +413,7 @@ def main():
                 seen_pids = True
                 pids.add(pid)
 
+    compiled_env_ignore_tags = parse_regex_inputs(ENV_IGNORED_TAGS)
     while adb.poll() is None:
         try:
             line = adb.stdout.readline()
@@ -394,7 +451,7 @@ def main():
                 line_buffer += colorize(' ' * (header_size - 1), bg=WHITE)
                 line_buffer += ' PID: %s   UID: %s   GIDs: %s' % (line_pid, line_uid, line_gids)
                 line_buffer += '\n'
-                print(line_buffer)
+                print_line(line_buffer)
                 last_tag = None  # Ensure next log gets a tag printed
 
         dead_pid, dead_pname = parse_death(tag, message)
@@ -404,7 +461,7 @@ def main():
             line_buffer += colorize(' ' * (header_size - 1), bg=RED)
             line_buffer += ' Process %s (PID: %s) ended' % (dead_pname, dead_pid)
             line_buffer += '\n'
-            print(line_buffer)
+            print_line(line_buffer)
             last_tag = None  # Ensure next log gets a tag printed
 
         # Make sure the backtrace is printed after a native crash
@@ -418,13 +475,13 @@ def main():
             continue
         if level in LOG_LEVELS_MAP and LOG_LEVELS_MAP[level] < min_level:
             continue
-        if args.ignored_tag and tag_in_tags_regex(tag, args.ignored_tag):
+        if args.ignored_tag and check_match_any_pattern(tag, args.ignored_tag):
             continue
-        if args.tag and not tag_in_tags_regex(tag, args.tag):
+        if args.tag and not check_match_any_pattern(tag, args.tag):
             continue
-        if args.msg and not msg_in_msgs_regex(message, args.msg):
+        if args.filter and not check_match_any_pattern(message, args.filter):
             continue
-        if tag_in_tags_regex(tag, ENV_IGNORED_TAGS):
+        if len(compiled_env_ignore_tags) > 0 and check_match_any_pattern(tag, compiled_env_ignore_tags):
             continue
 
         line_buffer = ''
@@ -457,9 +514,9 @@ def main():
         line_foreground = color if args.colorized else WHITE
         line_buffer += indent_wrap(colorize(message, fg=line_foreground))
         if sys.stdout.encoding.upper() not in ['UTF-8', 'UTF8']:
-            print(line_buffer.encode('utf-8'))
+            print_line(line_buffer.encode('utf-8'))
         else:
-            print(line_buffer)
+            print_line(line_buffer)
 
     clear_term_title()
 
