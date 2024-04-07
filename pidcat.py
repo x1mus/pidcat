@@ -137,9 +137,20 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
+STD_OUT_ENCODING = sys.stdout.encoding.upper()
+STD_OUT_ENCODING_UTF_8 = STD_OUT_ENCODING in ['UTF-8', 'UTF8']
+
+
+def encode(line_buffer: str) -> str:
+    if not STD_OUT_ENCODING_UTF_8:
+        return line_buffer.encode('utf-8')
+
+    return line_buffer
+
+
 def print_line(line: str):
     # Make development more straightforward by allowing all prints to be commented out in a single place
-    print(line)
+    print(encode(line))
     pass
 
 
@@ -261,7 +272,8 @@ def match_packages(package: str, named_processes: set[str], catchall_package: se
     return (token in catchall_package) if index == -1 else (token[:index] in catchall_package)
 
 
-def try_parse_death(pattern: Pattern, message: str, pid_group: int = 2, package_line_group: int = 1) -> Optional[tuple[str, str]]:
+def try_parse_death(pattern: Pattern, message: str, pid_group: int = 2, package_line_group: int = 1) -> Optional[
+    tuple[str, str]]:
     match = pattern.match(message)
     if match:
         pid = match.group(pid_group)
@@ -310,8 +322,8 @@ def parse_start_process(line: str):
     return None
 
 
-def set_term_title(title):
-    sys.stdout.write("\033]0;%s\a" % title)
+def set_term_title(title: str):
+    print_line("\033]0;%s\007" % title)
 
 
 def clear_term_title():
@@ -403,7 +415,7 @@ def main():
         RULES[key] = val
 
     device_name_command = base_adb_command + ["shell", "getprop", "ro.product.model"]
-    device_name = subprocess.Popen(device_name_command, stdout=PIPE, stderr=PIPE).communicate()[0]
+    device_name = subprocess.Popen(device_name_command, stdout=PIPE, stderr=PIPE).communicate()[0].decode("utf-8").strip()
     set_term_title(device_name)
 
     adb_command = base_adb_command[:]
@@ -554,10 +566,7 @@ def main():
 
         line_foreground = color if args.colorized else WHITE
         line_buffer += indent_wrap(width, header_size, colorize(message, fg=line_foreground))
-        if sys.stdout.encoding.upper() not in ['UTF-8', 'UTF8']:
-            print_line(line_buffer.encode('utf-8'))
-        else:
-            print_line(line_buffer)
+        print_line(line_buffer)
 
     clear_term_title()
 
