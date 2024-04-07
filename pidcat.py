@@ -49,6 +49,7 @@ parser.add_argument('--proguard-mapping', dest='proguard_mapping', action='store
 parser.add_argument('-m', '--msgs', dest='msg', action='append', help='Only output messages with regex(s)')
 parser.add_argument('-v', '--version', action='version', version='%(prog)s ' + __version__, help='Print the version number and exit')
 parser.add_argument('-a', '--all', dest='all', action='store_true', default=False, help='Print all log messages')
+parser.add_argument('--colorized', '--colorized', dest='colorized', action='store_true', default=False, help='Colorized log messages')
 
 args = parser.parse_args()
 min_level = LOG_LEVELS_MAP[args.min_level.upper()]
@@ -113,6 +114,11 @@ except:
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
 
 RESET = '\033[0m'
+
+colorized = False
+if len(sys.argv) > 1:
+  if sys.argv[1] == "--colorized":
+    colorized = True
 
 def termcolor(fg=None, bg=None):
   codes = []
@@ -406,7 +412,8 @@ while adb.poll() is None:
     replace = RULES[matcher]
     message = matcher.sub(replace, message)
 
-  linebuf += indent_wrap(message)
+  lineFg = color if colorized else WHITE
+  linebuf += indent_wrap(colorize(message, fg=lineFg))
   if sys.stdout.encoding.upper() not in ['UTF-8', 'UTF8']:
     print(linebuf.encode('utf-8'))
   else:
