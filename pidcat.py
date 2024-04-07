@@ -52,6 +52,7 @@ parser.add_argument('-v', '--version', action='version', version='%(prog)s ' + _
 parser.add_argument('-a', '--all', dest='all', action='store_true', default=False, help='Print all log messages')
 parser.add_argument('--colorized', '--colorized', dest='colorized', action='store_true', default=False, help='Colorized log messages')
 parser.add_argument('--timestamp', dest='add_timestamp', action='store_true', help='Prepend each line of output with the current time.')
+parser.add_argument('-f', '--force-windows-colors', dest='force_windows_colors', action='store_true', default=False, help='Force converting colors to Windows format')
 
 args = parser.parse_args()
 min_level = LOG_LEVELS_MAP[args.min_level.upper()]
@@ -118,6 +119,13 @@ try:
   h, width = struct.unpack('hh', fcntl.ioctl(0, termios.TIOCGWINSZ, struct.pack('hh', 0, 0)))
 except:
   pass
+
+try:
+  import colorama
+  colorama.init(convert=args.force_windows_colors)
+except ImportError:
+  if args.force_windows_colors:
+    raise
 
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
 

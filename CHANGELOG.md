@@ -15,6 +15,10 @@ Version 2.1.0 *(2016-09-07)*
  * New: `-a` / `--all` flag shows all logs.
  * Fix: Setting a tag width to 0 now correctly removes tags.
 
+Version 2.0.1 *(2015-09-15)*
+----------------------------
+* New: Fix colors on Windows. Use options `-f` / `--force-windows-colors` to force conversion
+  in case a terminal appears to be a tty. Requires module `colorama`
 
 Version 2.0.0 *(2015-05-25)*
 ----------------------------
