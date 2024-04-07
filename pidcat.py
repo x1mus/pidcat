@@ -50,6 +50,7 @@ parser.add_argument('-m', '--msgs', dest='msg', action='append', help='Only outp
 parser.add_argument('-v', '--version', action='version', version='%(prog)s ' + __version__, help='Print the version number and exit')
 parser.add_argument('-a', '--all', dest='all', action='store_true', default=False, help='Print all log messages')
 parser.add_argument('--colorized', '--colorized', dest='colorized', action='store_true', default=False, help='Colorized log messages')
+parser.add_argument('--timestamp', dest='add_timestamp', action='store_true', help='Prepend each line of output with the current time.')
 
 args = parser.parse_args()
 min_level = LOG_LEVELS_MAP[args.min_level.upper()]
@@ -104,6 +105,8 @@ named_processes = list(filter(lambda package: package.find(":") != -1, package))
 named_processes = map(lambda package: package if package.find(":") != len(package) - 1 else package[:-1], named_processes)
 
 header_size = args.tag_width + 1 + 3 + 1 # space, level, space
+if args.add_timestamp:
+  header_size += 12 + 1 # time, space
 
 stdout_isatty = sys.stdout.isatty()
 
@@ -205,7 +208,7 @@ PID_START_DALVIK = re.compile(r'^E/dalvikvm\(\s*(\d+)\): >>>>> ([a-zA-Z0-9._:]+)
 PID_KILL  = re.compile(r'^Killing (\d+):([a-zA-Z0-9._:]+)/[^:]+: (.*)$')
 PID_LEAVE = re.compile(r'^No longer want ([a-zA-Z0-9._:]+) \(pid (\d+)\): .*$')
 PID_DEATH = re.compile(r'^Process ([a-zA-Z0-9._:]+) \(pid (\d+)\) has died.?$')
-LOG_LINE  = re.compile(r'^([A-Z])/(.+?)\( *(\d+)\): (.*?)$')
+LOG_LINE  = re.compile(r'^[0-9-]+ ([0-9:.]+) ([A-Z])/(.+?)\( *(\d+)\): (.*?)$')
 BUG_LINE  = re.compile(r'.*nativeGetEnabledTags.*')
 BACKTRACE_LINE = re.compile(r'^#(.*?)pc\s(.*?)$')
 
@@ -221,7 +224,7 @@ set_term_title(device_name)
 
 adb_command = base_adb_command[:]
 adb_command.append('logcat')
-adb_command.extend(['-v', 'brief'])
+adb_command.extend(['-v', 'time'])
 
 if args.alternate_buffer:
  for buffer in args.alternate_buffer:
@@ -343,7 +346,7 @@ while adb.poll() is None:
   if log_line is None:
     continue
 
-  level, tag, owner, message = log_line.groups()
+  time, level, tag, owner, message = log_line.groups()
   tag = tag.strip()
   tag = proguard_mapping.get(tag, tag)
   start = parse_start_proc(line)
@@ -410,6 +413,8 @@ while adb.poll() is None:
   else:
     linebuf += ' ' + level + ' '
   linebuf += ' '
+  if args.add_timestamp:
+    linebuf = time + ' ' + linebuf
 
   # format tag message using rules
   for matcher in RULES:
