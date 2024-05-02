@@ -1,7 +1,7 @@
 PID Cat
 =======
 
->A fork of JakeWharton/pidcat, with the following PRs merged:
+>A fork of [JakeWharton/pidcat](https://github.com/JakeWharton/pidcat), with the following PRs merged (and a bit of refactoring):
 >
 >* [#187: Added setup.py](https://github.com/JakeWharton/pidcat/pull/189) (by [JamesConlan96](https://github.com/JamesConlan96))
 >* [#189: New -m REGEX to filter by message](https://github.com/JakeWharton/pidcat/pull/189) (by [johnnylambada](https://github.com/johnnylambada))
