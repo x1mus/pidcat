@@ -29,7 +29,7 @@ import sys
 from subprocess import PIPE
 from collections import deque
 
-__version__ = '2.2.0-unofficial'
+__version__ = '2.2.0+unofficial'
 
 from typing import Pattern, List, Optional
 
